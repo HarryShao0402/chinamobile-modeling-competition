@@ -1,0 +1,336 @@
+```{R}
+# 读取数据
+data <- read.csv("xhzw.csv")
+# 使用非缺失值的众数填充缺失值
+fill_missing_with_mode <- function(column) {
+  non_na_values <- na.omit(column)
+  if (length(non_na_values) > 0) {
+    mode_value <- as.numeric(names(sort(table(non_na_values), decreasing = TRUE)[1]))
+    column[is.na(column)] <- mode_value
+  }
+  return(column)
+}
+
+# 对每一列应用非缺失值的众数填充函数
+data <- as.data.frame(lapply(data, fill_missing_with_mode))
+
+
+```
+
+```{R}
+# 分离训练集和测试集
+library(caret)
+set.seed(42)
+index <- createDataPartition(data$是否携号转网, p = 0.8, list = FALSE)
+train_data <- data[index, ]
+test_data <- data[-index, ]
+```
+
+```{R}
+# Ridge 回归交叉验证
+
+library(glmnet)
+library(cvms)
+
+# 将数据标准化
+x <- model.matrix(是否携号转网 ~ . - 1, data = train_data)
+y <- train_data$是否携号转网
+x_scaled <- scale(x)
+```
+```{R}
+
+# 设置 Ridge 回归交叉验证
+ridge_cv <- cv.glmnet(x_scaled, y, alpha = 0, nfolds = 5)
+
+# 获取最佳 lambda
+best_lambda <- ridge_cv$lambda.min
+print(paste("最佳 lambda:", best_lambda))
+```
+
+```{R}
+# 在测试集上进行预测
+x_test <- model.matrix(是否携号转网 ~ . - 1, data = test_data)
+x_test_scaled <- scale(x_test)
+
+predictions_ridge <- predict(ridge_cv, newx = x_test_scaled, s = best_lambda, type = "response")
+
+# 将概率转换为类别标签
+predicted_labels_ridge <- ifelse(predictions_ridge > 0.5, 1, 0)
+
+# 计算混淆矩阵
+conf_matrix_ridge <- table(test_data$是否携号转网, predicted_labels_ridge)
+
+# 打印混淆矩阵
+print(conf_matrix_ridge)
+
+# 计算准确率
+accuracy_ridge <- sum(diag(conf_matrix_ridge)) / sum(conf_matrix_ridge)
+print(paste("准确率:", accuracy_ridge))
+
+# 计算精确率
+precision_ridge <- conf_matrix_ridge[2, 2] / sum(conf_matrix_ridge[, 2])
+print(paste("精确率:", precision_ridge))
+
+# 计算召回率
+recall_ridge <- conf_matrix_ridge[2, 2] / sum(conf_matrix_ridge[2, ])
+print(paste("召回率:", recall_ridge))
+
+```
+
+
+
+```{R}
+x_test <- model.matrix(是否携号转网 ~ . - 1, data = test_data)
+y_test <- test_data$是否携号转网
+
+# 使用交叉验证结果计算 AIC
+cv_aic <- ridge_cv$cvm[which.min(ridge_cv$cvm)] + 2 * ridge_cv$glmnet.fit$df
+
+# 使用测试集计算 AIC
+predictions <- predict(ridge_cv, newx = x_test, s = "lambda.min", type = "response")
+log_likelihood <- sum(log(ifelse(y_test == 1, predictions, 1 - predictions)))
+aic <- -2 * log_likelihood + 2 * ridge_cv$glmnet.fit$df
+
+# 打印 AIC 的值
+print(paste("交叉验证 AIC:", cv_aic))
+```
+
+```{R}
+best_model <- glmnet(x_scaled, y, alpha = 0)
+best_model$lambda
+predictions <- predict(best_model, newx = x_scaled, s = best_model$lambda)
+residuals <- y - predictions
+par(mfrow = c(1, 2))
+
+# 残差图
+plot(predictions, residuals, main = "Residuals vs Fitted Values", xlab = "Fitted Values", ylab = "Residuals")
+
+# QQ 图
+qqnorm(residuals)
+qqline(residuals)
+
+```
+
+```{R warning = false}
+# 从 data 中选择指定的变量
+selected_variables <- c("信用等级", "是否红名单", "是否家庭", "是否电视", "上次信用等级",
+                         "是否集团成员", "停机次数", "优惠数量", "是否异网双卡", "在网时长",
+                         "宽带得分", "性别", "是否宽带", "套餐档次", "流量超套费")
+
+# 从 data 中提取所选变量
+selected_data <- data[, c("是否携号转网", selected_variables)]
+
+# 划分训练集和测试集
+set.seed(123)  # 设置随机种子以确保可重复性
+index <- createDataPartition(selected_data$是否携号转网, p = 0.8, list = FALSE)
+train_data <- selected_data[index, ]
+test_data <- selected_data[-index, ]
+
+# 设置交叉验证参数
+train_control <- trainControl(method = "cv", number = 5)
+
+# 训练逻辑回归模型
+logistic_model <- train(是否携号转网 ~ ., data = train_data, method = "glm", family = "binomial", trControl = train_control)
+
+```
+
+```{R}
+# 预测测试集
+test_predictions <- predict(logistic_model, newdata = test_data, type = "raw")
+
+# 将概率转换为二分类标签
+predicted_labels <- ifelse(test_predictions > 0.5, 1, 0)
+
+# 计算混淆矩阵
+conf_matrix <- table(test_data$是否携号转网, predicted_labels)
+
+# 打印混淆矩阵
+print("混淆矩阵:")
+print(conf_matrix)
+
+# 计算准确率
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(paste("准确率:", accuracy))
+
+# 计算精确率
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+print(paste("精确率:", precision))
+
+# 计算召回率
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+print(paste("召回率:", recall))
+
+```
+
+
+
+
+```{R}
+set.seed(123)
+
+# 创建训练集和测试集
+index <- createDataPartition(train_data$是否携号转网, p = 0.8, list = FALSE)
+train_set <- train_data[index, ]
+test_set <- train_data[-index, ]
+
+# 创建交叉验证的控制参数
+train_control <- trainControl(method = "cv", number = 100)
+
+# 使用 train 函数时设置 method 参数为 "rpart"，使用交叉验证
+tree_model <- train(
+  是否携号转网 ~ ., 
+  data = train_set[, c("是否携号转网", selected_variables)],  # 选择指定的自变量
+  method = "rpart", 
+  trControl = train_control
+)
+
+# 使用测试集进行预测
+predictions <- predict(tree_model, newdata = test_set[, selected_variables], type = "raw")
+
+# 将概率转换为二进制标签
+predicted_labels <- ifelse(predictions > 0.5, 1, 0)
+
+# 计算混淆矩阵
+conf_matrix <- table(test_set$是否携号转网, predicted_labels)
+
+# 打印混淆矩阵
+print(conf_matrix)
+
+# 计算准确率
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(paste("准确率:", accuracy))
+
+# 计算精确率
+precision <- conf_matrix[2, 2] / sum(conf_matrix[, 2])
+print(paste("精确率:", precision))
+
+# 计算召回率
+recall <- conf_matrix[2, 2] / sum(conf_matrix[2, ])
+print(paste("召回率:", recall))
+
+```
+
+```{R options(warn=2)}
+sample_sizes <- seq(50, nrow(train_set), by = 50)
+
+# 存储结果的向量
+accuracy_vector <- numeric(length = length(sample_sizes))
+
+# 循环遍历不同的训练样本数量
+for (i in seq_along(sample_sizes)) {
+  current_size <- sample_sizes[i]
+  
+  # 选择部分训练集
+  current_train_set <- train_set[1:current_size, ]
+  
+  # 创建决策树模型
+  tree_model <- train(
+    是否携号转网 ~ ., 
+    data = current_train_set, 
+    method = "rpart"
+  )
+  
+  # 使用测试集进行预测
+  predictions <- predict(tree_model, newdata = test_set, type = "raw")
+  predicted_labels <- ifelse(predictions > 0.5, 1, 0)
+  
+  # 计算准确率
+  accuracy <- sum(diag(table(test_set$是否携号转网, predicted_labels))) / sum(table(test_set$是否携号转网, predicted_labels))
+  
+  # 存储准确率
+  accuracy_vector[i] <- accuracy
+}
+
+# 绘制学习曲线
+plot(sample_sizes, accuracy_vector, type = "b", 
+     xlab = "训练样本数量", ylab = "准确率", 
+     main = "决策树模型学习曲线")
+```
+
+cross-validation of svm
+```{R}
+# 导入所需库
+library(e1071)
+library(caret)
+
+set.seed(1)
+# 创建训练集和测试集
+train_data$是否携号转网 <- as.factor(train_data$是否携号转网)
+test_data$是否携号转网 <- as.factor(test_data$是否携号转网)
+
+index <- createDataPartition(train_data$是否携号转网, p = 0.8, list = FALSE)
+train_set <- train_data[index, ]
+test_set <- train_data[-index, ]
+
+# 创建交叉验证的控制参数
+train_control <- trainControl(method = "cv", number = 5)
+
+# 使用 train 函数时设置 method 参数为 "svmRadial"，使用交叉验证
+svm_model <- train(
+  是否携号转网 ~ ., 
+  data = train_set[, c("是否携号转网", selected_variables)],  # 选择指定的自变量
+  method = "svmRadial", 
+  trControl = train_control
+)
+
+# 使用测试集进行预测
+svm_predictions <- predict(svm_model, newdata = test_set[, selected_variables])
+
+# 计算混淆矩阵
+svm_conf_matrix <- table(test_set$是否携号转网, svm_predictions)
+
+# 打印混淆矩阵
+print(svm_conf_matrix)
+
+# 计算准确率
+svm_accuracy <- sum(diag(svm_conf_matrix)) / sum(svm_conf_matrix)
+print(paste("SVM 准确率:", svm_accuracy))
+
+# 计算召回率
+recall <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[2, ])
+print(paste("召回率:", recall))
+
+# 计算精确率
+precision <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[, 2])
+print(paste("精确率:", precision))
+
+```
+
+```{R}
+# 导入所需库
+library(e1071)
+set.seed(123)
+# 创建训练集和测试集
+index <- createDataPartition(train_data$是否携号转网, p = 0.8, list = FALSE)
+train_set <- train_data[index, ]
+test_set <- train_data[-index, ]
+
+# 将类别变量转换为因子类型
+train_set$是否携号转网 <- as.factor(train_set$是否携号转网)
+test_set$是否携号转网 <- as.factor(test_set$是否携号转网)
+
+# 创建 SVM 模型
+svm_model <- svm(是否携号转网 ~ ., data = train_set, kernel = "polynomial",degree = 15)
+
+# 使用测试集进行预测
+svm_predictions <- predict(svm_model, newdata = test_set)
+
+# 计算混淆矩阵
+svm_conf_matrix <- table(test_set$是否携号转网, svm_predictions)
+
+# 打印混淆矩阵
+print(svm_conf_matrix)
+
+# 计算准确率
+svm_accuracy <- sum(diag(svm_conf_matrix)) / sum(svm_conf_matrix)
+print(paste("准确率:", svm_accuracy))
+
+# 计算精确率
+svm_precision <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[, 2])
+print(paste("精确率:", svm_precision))
+
+# 计算召回率
+svm_recall <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[2, ])
+print(paste("召回率:", svm_recall))
+
+```
