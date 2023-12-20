@@ -1,0 +1,251 @@
+```{R}
+data <- read.csv("xhzw.csv")
+# 使用非缺失值的众数填充缺失值
+fill_missing_with_mode <- function(column) {
+  non_na_values <- na.omit(column)
+  if (length(non_na_values) > 0) {
+    mode_value <- as.numeric(names(sort(table(non_na_values), decreasing = TRUE)[1]))
+    column[is.na(column)] <- mode_value
+  }
+  return(column)
+}
+
+# 对每一列应用非缺失值的众数填充函数
+new_df <- as.data.frame(lapply(data, fill_missing_with_mode))
+
+```
+# 分离训练集和测试集
+
+```{R}
+library(caret)
+library(e1071)  # SVM
+library(glmnet)  # 逻辑回归
+library(rpart)  # 决策树
+set.seed(42)
+
+# 创建训练集和测试集
+index <- createDataPartition(new_df$是否携号转网, p = 0.8, list = FALSE)
+train_set <- new_df[index, ]
+test_set <- new_df[-index, ]
+train_set$是否携号转网 <- as.factor(train_set$是否携号转网)
+test_set$是否携号转网 <- as.factor(test_set$是否携号转网)
+
+# 选择自变量
+selected_variables <- c("是否红名单" , "信用等级",      "是否电视" ,    "上次信用等级", "是否家庭",     "是否集团成员", "停机次数",      "是否宽带",    
+"优惠数量",      "是否异网双卡", "在网时长",      "性别",        
+"流量超套费" ,   "消费得分",      "当月消费")
+
+# 创建交叉验证的控制参数
+train_control <- trainControl(method = "cv", number = 5)
+
+# SVM 模型
+svm_model <- train(
+  是否携号转网 ~ ., 
+  data = train_set[, c("是否携号转网", selected_variables)],  # 选择自变量
+  method = "svmRadial", 
+  trControl = train_control
+)
+
+# 逻辑回归模型
+logistic_model <- train(
+  是否携号转网 ~ ., 
+  data = train_set[, c("是否携号转网", selected_variables)],  # 选择自变量
+  method = "glm", 
+  family = "binomial", 
+  trControl = train_control
+)
+
+# 决策树模型
+tree_model <- train(
+  是否携号转网 ~ ., 
+  data = train_set[, c("是否携号转网", selected_variables)],  # 选择自变量
+  method = "rpart", 
+  trControl = train_control,
+  cp = 0.01, minsplit = 10, minbucket = 20
+)
+
+# 测试集预测
+svm_predictions <- predict(svm_model, newdata = test_set[, selected_variables])
+logistic_predictions <- predict(logistic_model, newdata = test_set[, selected_variables])
+tree_predictions <- predict(tree_model, newdata = test_set[, c("是否携号转网", selected_variables)])
+
+# 计算混淆矩阵
+svm_conf_matrix <- table(test_set$是否携号转网, svm_predictions)
+logistic_conf_matrix <- table(test_set$是否携号转网, logistic_predictions)
+tree_conf_matrix <- table(test_set$是否携号转网, tree_predictions)
+
+# 计算准确率
+svm_accuracy <- sum(diag(svm_conf_matrix)) / sum(svm_conf_matrix)
+logistic_accuracy <- sum(diag(logistic_conf_matrix)) / sum(logistic_conf_matrix)
+tree_accuracy <- sum(diag(tree_conf_matrix)) / sum(tree_conf_matrix)
+
+# 计算精确率
+svm_precision <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[, 2])
+logistic_precision <- logistic_conf_matrix[2, 2] / sum(logistic_conf_matrix[, 2])
+tree_precision <- tree_conf_matrix[2, 2] / sum(tree_conf_matrix[, 2])
+
+# 计算召回率
+svm_recall <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[2, ])
+logistic_recall <- logistic_conf_matrix[2, 2] / sum(logistic_conf_matrix[2, ])
+tree_recall <- tree_conf_matrix[2, 2] / sum(tree_conf_matrix[2, ])
+
+# 打印结果
+print("SVM 模型：")
+print(paste("准确率:", svm_accuracy))
+print(paste("精确率:", svm_precision))
+print(paste("召回率:", svm_recall))
+
+print("逻辑回归模型：")
+print(paste("准确率:", logistic_accuracy))
+print(paste("精确率:", logistic_precision))
+print(paste("召回率:", logistic_recall))
+
+print("决策树模型：")
+print(paste("准确率:", tree_accuracy))
+print(paste("精确率:", tree_precision))
+print(paste("召回率:", tree_recall))
+
+```
+
+```{R}
+library(caret)
+library(e1071)
+library(glmnet)
+library(rpart)
+
+set.seed(42)
+
+# 创建训练集和测试集
+index <- createDataPartition(new_df$是否携号转网, p = 0.8, list = FALSE)
+train_set <- new_df[index, ]
+test_set <- new_df[-index, ]
+train_set$是否携号转网 <- as.factor(train_set$是否携号转网)
+test_set$是否携号转网 <- as.factor(test_set$是否携号转网)
+
+# 移除常量变量
+non_constant_cols <- apply(train_set, 2, function(col) length(unique(col)) > 1)
+train_set <- train_set[, non_constant_cols]
+test_set <- test_set[, non_constant_cols]
+
+# 定义自变量
+selected_variables <- c("信用等级", "是否红名单", "是否家庭", "是否电视", "上次信用等级",
+                         "是否集团成员", "停机次数", "优惠数量", "是否异网双卡", "在网时长",
+                         "宽带得分", "性别", "是否宽带", "套餐档次", "流量超套费")
+
+# SVM 模型
+svm_model <- svm(是否携号转网 ~ ., data = train_set[, c("是否携号转网", selected_variables)], kernel = "polynomial", degree = 15,method = "class",
+                 cp = 0.01, minsplit = 10, minbucket = 20)
+
+# 逻辑回归模型
+x_train <- model.matrix(是否携号转网 ~ . - 1, data = train_set[, c("是否携号转网", selected_variables)])
+y_train <- as.numeric(as.character(train_set$是否携号转网))
+x_train <- model.matrix(是否携号转网 ~ . - 1, data = train_set[, c("是否携号转网", selected_variables)])
+
+x_train_scaled <- scale(x_train)
+
+lasso_cv <- cv.glmnet(x_train_scaled, y_train, alpha = 1, nfolds = 5)
+best_lambda <- lasso_cv$lambda.min
+
+logistic_model <- glmnet(x_train_scaled, y_train, alpha = 1, lambda = best_lambda)
+
+# 决策树模型
+tree_model <- rpart(是否携号转网 ~ ., data = train_set[, c("是否携号转网", selected_variables)], method = "class")
+
+# 在这里添加测试集的特征变量定义
+x_test <- model.matrix(是否携号转网 ~ . - 1, data = test_set[, c("是否携号转网", selected_variables)])
+
+x_test_scaled <- scale(x_test)  # 添加这一行进行标准化
+
+# 测试集预测
+svm_predictions <- predict(svm_model, newdata = test_set)
+logistic_predictions <- predict(logistic_model, newx = x_test_scaled, s = best_lambda, type = "class")
+tree_predictions <- predict(tree_model, newdata = test_set, type = "class")
+
+# 计算混淆矩阵
+svm_conf_matrix <- table(test_set$是否携号转网, svm_predictions)
+logistic_conf_matrix <- table(test_set$是否携号转网, logistic_predictions)
+tree_conf_matrix <- table(test_set$是否携号转网, tree_predictions)
+
+# 计算准确率
+svm_accuracy <- sum(diag(svm_conf_matrix)) / sum(svm_conf_matrix)
+logistic_accuracy <- sum(diag(logistic_conf_matrix)) / sum(logistic_conf_matrix)
+tree_accuracy <- sum(diag(tree_conf_matrix)) / sum(tree_conf_matrix)
+
+# 计算精确率
+svm_precision <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[, 2])
+logistic_precision <- logistic_conf_matrix[2, 2] / sum(logistic_conf_matrix[, 2])
+tree_precision <- tree_conf_matrix[2, 2] / sum(tree_conf_matrix[, 2])
+
+# 计算召回率
+svm_recall <- svm_conf_matrix[2, 2] / sum(svm_conf_matrix[2, ])
+logistic_recall <- logistic_conf_matrix[2, 2] / sum(logistic_conf_matrix[2, ])
+tree_recall <- tree_conf_matrix[2, 2] / sum(tree_conf_matrix[2, ])
+
+# 打印结果
+print("SVM 模型：")
+print(paste("准确率:", svm_accuracy))
+print(paste("精确率:", svm_precision))
+print(paste("召回率:", svm_recall))
+
+print("逻辑回归模型：")
+print(paste("准确率:", logistic_accuracy))
+print(paste("精确率:", logistic_precision))
+print(paste("召回率:", logistic_recall))
+
+print("决策树模型：")
+print(paste("准确率:", tree_accuracy))
+print(paste("精确率:", tree_precision))
+print(paste("召回率:", tree_recall))
+
+```
+
+```{R}
+# Ridge 回归交叉验证
+
+library(glmnet)
+library(cvms)
+
+# 将数据标准化
+x <- model.matrix(是否携号转网 ~ . - 1, data = train_data)
+y <- train_data$是否携号转网
+x_scaled <- scale(x)
+```
+```{R}
+
+# 设置 Ridge 回归交叉验证
+ridge_cv <- cv.glmnet(x_scaled, y, alpha = 0, nfolds = 5)
+
+# 获取最佳 lambda
+best_lambda <- ridge_cv$lambda.min
+print(paste("最佳 lambda:", best_lambda))
+```
+
+```{R}
+# 在测试集上进行预测
+x_test <- model.matrix(是否携号转网 ~ . - 1, data = test_data)
+x_test_scaled <- scale(x_test)
+
+predictions_ridge <- predict(ridge_cv, newx = x_test_scaled, s = best_lambda, type = "response")
+
+# 将概率转换为类别标签
+predicted_labels_ridge <- ifelse(predictions_ridge > 0.5, 1, 0)
+
+# 计算混淆矩阵
+conf_matrix_ridge <- table(test_data$是否携号转网, predicted_labels_ridge)
+
+# 打印混淆矩阵
+print(conf_matrix_ridge)
+
+# 计算准确率
+accuracy_ridge <- sum(diag(conf_matrix_ridge)) / sum(conf_matrix_ridge)
+print(paste("准确率:", accuracy_ridge))
+
+# 计算精确率
+precision_ridge <- conf_matrix_ridge[2, 2] / sum(conf_matrix_ridge[, 2])
+print(paste("精确率:", precision_ridge))
+
+# 计算召回率
+recall_ridge <- conf_matrix_ridge[2, 2] / sum(conf_matrix_ridge[2, ])
+print(paste("召回率:", recall_ridge))
+
+```
